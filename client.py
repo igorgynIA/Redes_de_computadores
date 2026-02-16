@@ -8,7 +8,7 @@ from protocol import Segmento, Pacote, Quadro, enviar_pela_rede_ruidosa
 # --- CONFIGURAÇÃO ---
 MY_VIP = "HOST_A"
 DEST_VIP = "SERVIDOR_PRIME"
-ROUTER_ADDR = ("127.0.0.1", 6000)
+ROUTER_ADDR = ("127.0.0.1", 5000)
 TIMEOUT_SEGUNDOS = 3.0 # Tempo antes de desistir e reenviar
 
 class ChatClient:
@@ -38,7 +38,7 @@ class ChatClient:
 
         # --- Rede e Estado Stop-and-Wait ---
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(("0.0.0.0", 0))
+        self.sock.bind(("127.0.0.1", 6001)) # Porta que o Router usa para devolver dados ao HOST_A
         
         self.seq_atual = 0  # Começa com 0
         self.ack_event = threading.Event() # Sinalizador de ACK recebido

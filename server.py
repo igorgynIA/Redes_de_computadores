@@ -34,8 +34,8 @@ def enviar_ack(sock, addr, seq_num, dst_vip):
     # 3. Quadro
     frame = Quadro(src_mac="SERVR", dst_mac="CLIEN", pacote_dict=pkt.to_dict())
     
-    # Envia (ACKs também podem se perder, então usamos a rede ruidosa)
-    enviar_pela_rede_ruidosa(sock, frame.serializar(), addr)
+    # Em vez de enviar para 'addr' (que seria o IP direto), envia para o roteador
+    enviar_pela_rede_ruidosa(sock, frame.serializar(), ("127.0.0.1", 5000))
     print(f"[ARQ] Enviado ACK {seq_num} para {addr}")
 
 def main():
