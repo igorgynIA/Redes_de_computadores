@@ -14,6 +14,13 @@ import random
 import time
 import socket
 
+# Cores para o terminal
+C_RED = "\033[91m"    # Erros físicos/CRC
+C_GREEN = "\033[92m"  # Mensagens de Aplicação
+C_YELLOW = "\033[93m" # Retransmissões/Transporte
+C_CYAN = "\033[96m"   # Controle/ACKs
+C_MAGENTA = "\033[95m"# Roteamento
+
 # --- CONFIGURAÇÃO DA SIMULAÇÃO ---
 # Chance de um pacote ser totalmente perdido (0.0 a 1.0)
 PROBABILIDADE_PERDA = 0.2  # 20%
@@ -155,11 +162,11 @@ def enviar_pela_rede_ruidosa(socket_udp, bytes_dados, endereco_destino):
       bytes_dados: O quadro serializado (bytes).
       endereco_destino: Tupla (IP, Porta) real do destino.
     """
-    print(f"   [FÍSICA] Tentando transmitir {len(bytes_dados)} bytes...")
+    print(f"{C_GREEN}   [FÍSICA] Tentando transmitir {len(bytes_dados)} bytes...{C_GREEN}")
 
     # 1. SIMULAÇÃO DE PERDA (Congestionamento)
     if random.random() < PROBABILIDADE_PERDA:
-        print("   [FÍSICA] O pacote foi perdido na rede (Drop).")
+        print(f"{C_RED}   [FÍSICA] O pacote foi perdido na rede (Drop).{C_RED}")
         return # Simplesmente não envia, simulando perda total.
 
     # 2. SIMULAÇÃO DE CORRUPÇÃO (Ruído Elétrico)
@@ -167,7 +174,7 @@ def enviar_pela_rede_ruidosa(socket_udp, bytes_dados, endereco_destino):
     array_dados = bytearray(bytes_dados)
     
     if random.random() < PROBABILIDADE_CORRUPCAO:
-        print("   [FÍSICA] Interferência eletromagnética! Bits trocados.")
+        print(f"{C_RED}   [FÍSICA] Interferência eletromagnética! Bits trocados.{C_RED}")
         
         # Escolhe um byte aleatório para corromper
         if len(array_dados) > 0:
@@ -180,4 +187,4 @@ def enviar_pela_rede_ruidosa(socket_udp, bytes_dados, endereco_destino):
 
     # 4. ENVIO REAL
     socket_udp.sendto(bytes(array_dados), endereco_destino)
-    print("   [FÍSICA] Sinal enviado para o meio físico.")
+    print(f"{C_GREEN}   [FÍSICA] Sinal enviado para o meio físico.{C_GREEN}")
