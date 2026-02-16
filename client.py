@@ -33,6 +33,9 @@ class ChatClient:
         self.btn_env = tk.Button(frame, text="Enviar", command=self.iniciar_envio_thread, bg="#4CAF50", fg="white")
         self.btn_env.pack(side=tk.LEFT, padx=5)
         
+        # No final do método __init__
+        self.entry.bind("<Return>", lambda event: self.iniciar_envio_thread())
+        
         self.btn_file = tk.Button(frame, text="📁", command=self.enviar_arquivo)
         self.btn_file.pack(side=tk.LEFT)
 
