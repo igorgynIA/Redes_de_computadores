@@ -24,7 +24,7 @@ def main():
 
     while True:
         try:
-            data, addr = sock.recvfrom(4096)
+            data, addr = sock.recvfrom(50000)
             quadro_dict, integro = Quadro.deserializar(data)
             
             if not integro:

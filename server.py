@@ -14,7 +14,7 @@ C_MAGENTA = "\033[95m"# Roteamento
 # --- CONFIGURAÇÃO ---
 MEU_VIP = "SERVIDOR_PRIME"
 PORTA_ESCUTA = 6000
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 50000
 
 # Estado do Stop-and-Wait
 SEQ_ESPERADO = 0  # Começamos esperando o pacote 0
