@@ -37,7 +37,7 @@ def main():
                 proximo_no = ROUTING_TABLE[dst_vip]
                 
                 # Re-encapsula (Novo salto na camada de enlace)
-                novo_quadro = Quadro(src_mac="ROUTER_MAC", dst_mac="NEXT_MAC", pacote_dict=pacote)
+                novo_quadro = Quadro(src_mac="RT_01", dst_mac="SV_01", pacote_dict=pacote)
                 
                 print(f"[ROUTER] Encaminhando {dst_vip} para {proximo_no} (TTL: {pacote['ttl']})")
                 enviar_pela_rede_ruidosa(sock, novo_quadro.serializar(), proximo_no)
