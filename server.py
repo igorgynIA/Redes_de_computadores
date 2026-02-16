@@ -1,62 +1,93 @@
 import socket
 import json
 import time
-from protocol import Quadro  # Importa apenas as classes básicas
+from protocol import Segmento, Pacote, Quadro, enviar_pela_rede_ruidosa
 
 # --- CONFIGURAÇÃO ---
 MEU_VIP = "SERVIDOR_PRIME"
 PORTA_ESCUTA = 6000
 BUFFER_SIZE = 4096
 
+# Estado do Stop-and-Wait
+SEQ_ESPERADO = 0  # Começamos esperando o pacote 0
+
 def formatar_mensagem(msg_dict):
-    """Formata o JSON recebido para exibir bonitinho no terminal"""
     try:
         ts = time.strftime('%H:%M:%S', time.localtime(msg_dict['timestamp']))
         sender = msg_dict['sender']
-        content = msg_dict['content']
-        tipo = msg_dict['type']
-        
-        if tipo == 'file':
-            return f"[{ts}] 📁 {sender} enviou arquivo: {content}"
-        return f"[{ts}] {sender} diz: {content}"
+        message = msg_dict['message']
+        return f"[{ts}] {sender} diz: {message}"
     except:
         return "[Msg Malformada]"
 
-def main():
-    print(f"--- {MEU_VIP} INICIADO NA PORTA {PORTA_ESCUTA} ---")
-    print("Aguardando mensagens...")
+def enviar_ack(sock, addr, seq_num, dst_vip):
+    """
+    Constrói e envia um pacote contendo apenas um ACK.
+    O ACK também deve seguir a estrutura de Bonecas Russas!
+    """
+    # 1. Segmento (ACK=True)
+    seg = Segmento(seq_num=seq_num, is_ack=True, payload={})
+    
+    # 2. Pacote
+    pkt = Pacote(src_vip=MEU_VIP, dst_vip=dst_vip, ttl=5, segmento_dict=seg.to_dict())
+    
+    # 3. Quadro
+    frame = Quadro(src_mac="SERVR", dst_mac="CLIEN", pacote_dict=pkt.to_dict())
+    
+    # Envia (ACKs também podem se perder, então usamos a rede ruidosa)
+    enviar_pela_rede_ruidosa(sock, frame.serializar(), addr)
+    print(f"[ARQ] Enviado ACK {seq_num} para {addr}")
 
-    # Configura socket UDP
+def main():
+    global SEQ_ESPERADO
+    print(f"--- {MEU_VIP} (Fase 2: Confiável) ---")
+    print(f"Ouvindo na porta {PORTA_ESCUTA}...")
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("0.0.0.0", PORTA_ESCUTA))
 
     while True:
         try:
-            # 1. Recebimento Físico
+            # --- RECEBIMENTO ---
             data, addr = sock.recvfrom(BUFFER_SIZE)
             
-            # 2. Camada de Enlace (Verifica CRC)
+            # 1. Enlace: Verifica CRC
             quadro_dict, integro = Quadro.deserializar(data)
-            
             if not integro:
-                print(f"[ERRO] Quadro de {addr} corrompido! Descartando.")
-                continue # Simula o hardware descartando silenciosamente
-            
-            # 3. Decapsulamento (Bonecas Russas)
-            # Quadro -> Pacote -> Segmento -> Aplicação
+                print(f"[ERRO FÍSICO] CRC Falhou. Pacote de {addr} ignorado.")
+                continue # Se corrompeu, não enviamos ACK (Cliente vai dar timeout)
+
+            # Decapsulamento
             pacote = quadro_dict['data']
             segmento = pacote['data']
-            app_data = segmento['payload']
             
-            # 4. Aplicação (Exibir)
-            msg_formatada = formatar_mensagem(app_data)
-            print("-" * 40)
-            print(f"Recebido de {addr}:")
-            print(msg_formatada)
-            print("-" * 40)
+            # --- TRANSPORTE (Lógica Stop-and-Wait) ---
+            seq_recebido = segmento['seq_num']
+            
+            if seq_recebido == SEQ_ESPERADO:
+                # PACOTE NOVO E CORRETO
+                print(f"[ARQ] Recebido SEQ {seq_recebido} (Esperado). Aceitando.")
+                
+                # Entrega para Aplicação
+                app_data = segmento['payload']
+                print("-" * 40)
+                print(formatar_mensagem(app_data))
+                print("-" * 40)
+                
+                # Envia ACK
+                enviar_ack(sock, addr, seq_recebido, pacote['src_vip'])
+                
+                # Inverte o esperado (0->1 ou 1->0)
+                SEQ_ESPERADO = 1 - SEQ_ESPERADO
+                
+            else:
+                # DUPLICATA
+                print(f"[ARQ] Duplicata detectada! Recebido {seq_recebido}, mas esperava {SEQ_ESPERADO}.")
+                print(f"[ARQ] Reenviando ACK {seq_recebido} para destravar o cliente.")
+                # Reenvia o ACK do que chegou (para o cliente parar de reenviar)
+                enviar_ack(sock, addr, seq_recebido, pacote['src_vip'])
 
         except KeyboardInterrupt:
-            print("\nServidor encerrado.")
             break
         except Exception as e:
             print(f"Erro: {e}")
