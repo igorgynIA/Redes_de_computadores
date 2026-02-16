@@ -75,12 +75,21 @@ class ChatClient:
         return frame.serializar()
 
     def iniciar_envio_thread(self):
+        # 1. O SEGREDO: Se o botão estiver desativado, ignora qualquer comando (inclusive o Enter)
+        if self.btn_env["state"] == "disabled":
+            return
+
         texto = self.entry.get()
         if not texto: return
+    
+        # 2. TRAVA IMEDIATA: Desativa o botão aqui na thread principal (UI)
+        # Isso garante que o próximo 'Enter' já encontre o botão desativado
+        self.btn_env.config(state="disabled")
+    
         self.entry.delete(0, tk.END)
         self.chat_print(f"Você: {texto}")
-        
-        # Roda o envio confiável em background
+    
+        # 3. Dispara a thread de rede
         threading.Thread(target=self.enviar_confiavel, args=(texto, "text")).start()
 
     def enviar_arquivo(self):
