@@ -86,6 +86,10 @@ class ChatClient(ctk.CTk):
         pop.destroy()
 
     def iniciar_envio_thread(self):
+        # Se o botão estiver desativado, ignora qualquer comando (inclusive o Enter)
+        if self.btn_env["state"] == "disabled":
+            return
+
         texto = self.entry.get()
         if not texto: return
         self.entry.delete(0, "end")
