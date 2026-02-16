@@ -25,11 +25,16 @@ class ChatClient(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         # 1. Área de Chat
-        self.text_area = ctk.CTkTextbox(self, state='disabled', corner_radius=10)
+        self.text_area = ctk.CTkTextbox(self, state='disabled', corner_radius=10, font=("Roboto", 14))
         self.text_area.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
 
+        # --- CONFIGURAÇÃO VISUAL AVANÇADA (Tags do Tkinter) ---
+        self.text_area._textbox.tag_config("direita", justify="right", foreground="gray", spacing3=5)
+        self.text_area._textbox.tag_config("msg_user", foreground="white")
+        # ------------------------------------------------------
+
         # 2. Área de Logs (Terminal Style)
-        self.log_area = ctk.CTkTextbox(self, height=150, fg_color="#1a1a1a", text_color="#00ff00", corner_radius=10)
+        self.log_area = ctk.CTkTextbox(self, height=150, fg_color="#1a1a1a", text_color="#00ff00", corner_radius=10, font=("Consolas", 12))
         self.log_area.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="ew")
 
         # 3. Frame de Entrada
@@ -63,20 +68,20 @@ class ChatClient(ctk.CTk):
 
     # --- UI Methods ---
     def log(self, msg, cor=None):
-        # CustomTkinter não usa tags de cor linha a linha facilmente, mantendo texto padrão verde do init
         self.log_area.configure(state='normal')
         self.log_area.insert("end", f"> {msg}\n")
         self.log_area.configure(state='disabled')
         self.log_area.see("end")
 
-    def chat_print(self, msg):
+    def chat_print(self, msg, align="left"):
+        """Imprime mensagens genéricas (logs ou msg recebidas)"""
+        horario = time.strftime('%H:%M')
         self.text_area.configure(state='normal')
-        self.text_area.insert("end", msg + "\n")
+        self.text_area.insert("end", f"[{horario}] {msg}\n")
         self.text_area.configure(state='disabled')
         self.text_area.see("end")
 
     def abrir_seletor_emojis(self):
-        # Pop-up moderno para Emojis
         top = ctk.CTkToplevel(self)
         top.title("Emojis")
         top.geometry("250x160")
@@ -92,7 +97,7 @@ class ChatClient(ctk.CTk):
         window.destroy()
         self.entry.focus_set()
 
-    # --- Network Logic (Inalterada) ---
+    # --- Network Logic ---
     def construir_pilha(self, conteudo, tipo):
         app_data = {
             "type": tipo,
@@ -106,42 +111,84 @@ class ChatClient(ctk.CTk):
         return frame.serializar()
 
     def iniciar_envio_thread(self):
-        if self.btn_env._state == "disabled": return
-        texto = self.entry.get()
-        if not texto: return
-        
-        self.btn_env.configure(state="disabled")
-        self.entry.delete(0, "end")
-        self.chat_print(f"Você: {texto}")
-        
-        threading.Thread(target=self.enviar_confiavel, args=(texto, "text")).start()
+            if self.btn_env._state == "disabled": return
+            texto = self.entry.get()
+            if not texto: return
+            
+            self.btn_env.configure(state="disabled")
+            self.entry.delete(0, "end")
+            
+            horario = time.strftime('%H:%M')
+            
+            self.text_area.configure(state='normal')
+            
+            # Insere o Texto da Mensagem (Alinhado à esquerda padrão)
+            self.text_area.insert("end", f"Você: {texto}\n", "msg_user")
+            
+            # Insere Hora + Status (Alinhado à DIREITA usando a tag 'direita')
+            meta_info = f"{horario} 🕒\n" 
+            self.text_area._textbox.insert("end", meta_info, "direita")
+            
+            self.text_area.configure(state='disabled')
+            self.text_area.see("end")
+            # ---------------------------
+            
+            threading.Thread(target=self.enviar_confiavel, args=(texto, "text")).start()
 
     def enviar_arquivo(self):
         path = filedialog.askopenfilename()
         if path:
             nome = path.split('/')[-1]
-            self.chat_print(f"Enviando: {nome}")
+            self.chat_print(f"Enviando arquivo: {nome}")
             threading.Thread(target=self.enviar_confiavel, args=(nome, "file")).start()
+            
+    def atualizar_status_visual(self, status_antigo, status_novo):
+        """
+        Busca o símbolo antigo na última mensagem e troca pelo novo.
+        """
+        try:
+            self.text_area.configure(state='normal')
+            
+            posicao = self.text_area._textbox.search(status_antigo, "end-5l", "end")
+            
+            if posicao:
+                fim_posicao = f"{posicao}+{len(status_antigo)}c"
+                
+                # Deleta e insere o novo com a mesma formatação da linha (tag 'direita' é mantida pela linha)
+                self.text_area._textbox.delete(posicao, fim_posicao)
+                self.text_area._textbox.insert(posicao, status_novo, "direita")
+            
+            self.text_area.configure(state='disabled')
+            self.text_area.see("end")
+        except Exception as e:
+            print(f"Erro visual: {e}")
 
     def enviar_confiavel(self, conteudo, tipo):
         bytes_envio = self.construir_pilha(conteudo, tipo)
         tentativa = 1
         
+        status_atual = "🕒"
         self.log(f"--- Iniciando envio SEQ {self.seq_atual} ---")
         
         while True:
             self.log(f"Tentativa {tentativa}: Enviando...")
+            
             enviar_pela_rede_ruidosa(self.sock, bytes_envio, ROUTER_ADDR)
+            
+            if status_atual == "🕒":
+                self.atualizar_status_visual("🕒", "✓")
+                status_atual = "✓"
             
             self.ack_event.clear()
             ack_chegou = self.ack_event.wait(timeout=TIMEOUT_SEGUNDOS)
             
             if ack_chegou and self.ack_recebido_seq == self.seq_atual:
                 self.log(f"ACK {self.seq_atual} recebido com sucesso!")
+                self.atualizar_status_visual("✓", "✓✓")
                 self.seq_atual = 1 - self.seq_atual
                 break
             else:
-                self.log("TIMEOUT ou ACK incorreto. Retransmitindo...")
+                self.log("TIMEOUT. Retransmitindo...")
                 tentativa += 1
 
         self.btn_env.configure(state="normal")
@@ -164,6 +211,11 @@ class ChatClient(ctk.CTk):
                     self.log(f"Recebido ACK {seq}")
                     self.ack_recebido_seq = seq
                     self.ack_event.set()
+                else:
+                    # Mensagem recebida de outro usuário
+                    sender = segmento['payload']['sender']
+                    msg = segmento['payload']['message']
+                    self.chat_print(f"{sender}: {msg}")
                     
             except Exception as e:
                 print(e)
