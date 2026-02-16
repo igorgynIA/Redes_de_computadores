@@ -22,3 +22,5 @@ Para que a rede funcione corretamente, os terminais devem ser iniciados na ordem
 3. **Terminal 3 (Cliente):** Interface gráfica (GUI) para interação do usuário.
    ```bash
    python client.py
+
+Na interface aberta após rodar o client.py, digite suas mensagens na área de texto e visualize as tentativas de comunicação da rede. Os logs em vermelho indicam erros como alteração dos bits e perda de pacotes, cor amarela indica a retransmissão dos pacotes e cor verde indica que o processo está andando conforme o planejado.
