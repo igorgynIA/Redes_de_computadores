@@ -5,6 +5,7 @@ import threading
 import time
 import base64
 import sys
+import os
 from protocol import Segmento, Pacote, Quadro, enviar_pela_rede_ruidosa
 
 ctk.set_appearance_mode("dark")
@@ -19,7 +20,7 @@ class ChatClient(ctk.CTk):
         super().__init__()
         self.MY_VIP = meu_vip 
         self.title(f"Mini-NET - {self.MY_VIP}")
-        self.geometry("650x750")
+        self.geometry("680x750")
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -48,6 +49,10 @@ class ChatClient(ctk.CTk):
 
         self.btn_file = ctk.CTkButton(self.input_frame, text="📁", width=40, height=40, command=self.enviar_arquivo)
         self.btn_file.pack(side="left", padx=5)
+        
+        # Botão de Gerenciamento de Downloads
+        self.btn_downloads = ctk.CTkButton(self.input_frame, text="📥 (0)", width=60, height=40, command=self.abrir_downloads)
+        self.btn_downloads.pack(side="left", padx=5)
 
         self.btn_env = ctk.CTkButton(self.input_frame, text="Enviar", width=80, height=40, command=self.iniciar_envio)
         self.btn_env.pack(side="left")
@@ -55,14 +60,14 @@ class ChatClient(ctk.CTk):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", 0))
         
-        # Estado de Envio
         self.seq_atual = 0
         self.mensagens_pendentes = {} 
         self.lock = threading.Lock()
         
-        # Estado de Recebimento (NOVO: Para ordenar mensagens do servidor)
         self.seq_esperado_servidor = 0
         self.buffer_recebimento = {}
+        self.repositorio_arquivos = {} 
+        self.arquivos_prontos = {} # Guarda os arquivos montados esperando download
         
         threading.Thread(target=self.loop_recebimento, daemon=True).start()
         threading.Thread(target=self.monitor_timeouts, daemon=True).start()
@@ -113,6 +118,45 @@ class ChatClient(ctk.CTk):
             self.text_area.configure(state='disabled')
         except: pass
 
+    def atualizar_btn_downloads(self):
+        qtd = len(self.arquivos_prontos)
+        if qtd > 0:
+            self.btn_downloads.configure(text=f"📥 ({qtd})", fg_color="#4CAF50")
+        else:
+            self.btn_downloads.configure(text=f"📥 (0)", fg_color=["#3B8ED0", "#1F6AA5"])
+
+    def abrir_downloads(self):
+        if not self.arquivos_prontos: return
+        
+        top = ctk.CTkToplevel(self)
+        top.title("Arquivos Prontos para Baixar")
+        top.geometry("400x300")
+        top.attributes("-topmost", True)
+        
+        for nome, bytes_arq in self.arquivos_prontos.items():
+            frame = ctk.CTkFrame(top)
+            frame.pack(fill="x", padx=10, pady=5)
+            
+            lbl = ctk.CTkLabel(frame, text=nome, width=250, anchor="w")
+            lbl.pack(side="left", padx=10)
+            
+            btn = ctk.CTkButton(frame, text="Salvar", width=60, command=lambda n=nome, b=bytes_arq: self.salvar_arquivo_disco(n, b, top))
+            btn.pack(side="right", padx=10, pady=5)
+
+    def salvar_arquivo_disco(self, nome, bytes_arq, window):
+        path = filedialog.asksaveasfilename(initialfile=nome, title="Salvar Arquivo")
+        if path:
+            try:
+                with open(path, "wb") as f:
+                    f.write(bytes_arq)
+                del self.arquivos_prontos[nome]
+                self.atualizar_btn_downloads()
+                self.log(f"Arquivo salvo em: {path}", "verde")
+                window.destroy()
+                self.abrir_downloads()
+            except Exception as e:
+                self.log(f"Erro ao salvar arquivo: {e}", "vermelho")
+
     def construir_pilha(self, conteudo, tipo, seq, filename=None):
         app_data = {
             "type": tipo,
@@ -150,32 +194,64 @@ class ChatClient(ctk.CTk):
         
         threading.Thread(target=self.enviar_dados, args=(texto, "text", seq)).start()
 
+    def enviar_arquivo_thread(self, path):
+        nome = path.split('/')[-1]
+        CHUNK_SIZE = 24000 
+        
+        try:
+            with open(path, 'rb') as f:
+                dados_brutos = f.read()
+
+            # MUDANÇA: Converte o arquivo TODO para base64 primeiro, DEPOIS corta o texto.
+            dados_b64_completos = base64.b64encode(dados_brutos).decode('utf-8')
+            
+            fatias = [dados_b64_completos[i:i + CHUNK_SIZE] for i in range(0, len(dados_b64_completos), CHUNK_SIZE)]
+            total = len(fatias)
+            
+            self.log(f"Enviando {nome} em {total} pacotes grandes...", "ciano")
+
+            horario = time.strftime('%H:%M')
+            self.text_area.configure(state='normal')
+            self.text_area.insert("end", f"Você: 📁 {nome}\n", "msg_user")
+            
+            seq_final = self.seq_atual + total - 1
+            tag_status = f"status_{seq_final}"
+            self.text_area._textbox.insert("end", f"{horario} 🕒\n", ("direita", tag_status))
+            self.text_area.configure(state='disabled')
+            self.text_area.see("end")
+
+            for i, fatia_b64 in enumerate(fatias):
+                payload_fragmento = {
+                    "filename": nome, 
+                    "chunk_index": i, 
+                    "total_chunks": total, 
+                    "content": fatia_b64
+                }
+                
+                seq = self.obter_novo_seq()
+                bytes_envio = self.construir_pilha(payload_fragmento, "file_chunk", seq)
+                
+                with self.lock:
+                    self.mensagens_pendentes[seq] = {
+                        "bytes": bytes_envio,
+                        "time": time.time(),
+                        "tentativas": 1
+                    }
+                
+                enviar_pela_rede_ruidosa(self.sock, bytes_envio, ROUTER_ADDR)
+                
+                if i == total - 1:
+                    self.atualizar_status_visual(seq, "✓")
+                
+                time.sleep(0.05)
+
+        except Exception as e:
+            self.log(f"Erro ao enviar arquivo: {e}", "vermelho")
+
     def enviar_arquivo(self):
         path = filedialog.askopenfilename()
         if path:
-            nome = path.split('/')[-1]
-            try:
-                with open(path, 'rb') as f:
-                    dados_brutos = f.read()
-                if len(dados_brutos) > 50000:
-                    self.log("ERRO: Arquivo muito grande (>50kb)", "vermelho")
-                    return
-                dados_b64 = base64.b64encode(dados_brutos).decode('utf-8')
-
-                seq = self.obter_novo_seq()
-                horario = time.strftime('%H:%M')
-                
-                self.text_area.configure(state='normal')
-                self.text_area.insert("end", f"Você: 📁 {nome}\n", "msg_user")
-                
-                tag_status = f"status_{seq}"
-                self.text_area._textbox.insert("end", f"{horario} 🕒\n", ("direita", tag_status))
-                self.text_area.configure(state='disabled')
-                self.text_area.see("end")
-
-                threading.Thread(target=self.enviar_dados, args=(dados_b64, "file", seq, nome)).start()
-            except Exception as e:
-                self.log(f"Erro ao ler arquivo: {e}", "vermelho")
+            threading.Thread(target=self.enviar_arquivo_thread, args=(path,)).start()
 
     def enviar_dados(self, conteudo, tipo, seq, filename=None):
         bytes_envio = self.construir_pilha(conteudo, tipo, seq, filename)
@@ -206,19 +282,47 @@ class ChatClient(ctk.CTk):
                         enviar_pela_rede_ruidosa(self.sock, info["bytes"], ROUTER_ADDR)
 
     def processar_mensagem_tela(self, payload):
-        """Helper para imprimir na tela a mensagem recebida"""
         sender = payload['sender']
-        msg = payload['message']
         tipo = payload.get('type')
         
         if tipo == "hello":
             self.chat_print(f"[{sender} ENTROU NO CHAT]")
             return
 
+        if tipo == "file_chunk":
+            chunk_data = payload.get('message', {})
+            nome = chunk_data.get('filename', 'arquivo')
+            idx = chunk_data.get('chunk_index', 0)
+            total = chunk_data.get('total_chunks', 1)
+            conteudo_b64 = chunk_data.get('content', '')
+
+            if nome not in self.repositorio_arquivos:
+                self.repositorio_arquivos[nome] = [None] * total
+            
+            self.repositorio_arquivos[nome][idx] = conteudo_b64
+
+            # Se recebeu o arquivo inteiro
+            if all(f is not None for f in self.repositorio_arquivos[nome]):
+                try:
+                    full_b64 = "".join(self.repositorio_arquivos[nome])
+                    bytes_finais = base64.b64decode(full_b64)
+                    
+                    # Guarda o arquivo na memória e atualiza a interface
+                    self.arquivos_prontos[nome] = bytes_finais
+                    self.chat_print(f"📁 {sender} enviou arquivo: {nome}")
+                    self.atualizar_btn_downloads()
+                    
+                except Exception as e:
+                    self.chat_print(f"❌ Erro ao reconstruir {nome}: {e}")
+                finally:
+                    del self.repositorio_arquivos[nome]
+            return
+
         nome_arq = payload.get('filename')
         if nome_arq:
             self.chat_print(f"{sender} enviou arquivo: {nome_arq}")
         else:
+            msg = payload.get('message', '')
             self.chat_print(f"{sender}: {msg}")
 
     def loop_recebimento(self):
@@ -243,21 +347,18 @@ class ChatClient(ctk.CTk):
                             self.atualizar_status_visual(seq, "✓✓")
                 else:
                     seq_recebido = segmento['seq_num']
-                    remetente_pacote = pacote['src_vip'] # SERVIDOR_PRIME
+                    remetente_pacote = pacote['src_vip']
                     
-                    # Envia ACK obrigatoriamente
                     ack_seg = Segmento(seq_num=seq_recebido, is_ack=True, payload={})
                     ack_pkt = Pacote(src_vip=self.MY_VIP, dst_vip=remetente_pacote, ttl=5, segmento_dict=ack_seg.to_dict())
                     ack_frame = Quadro(src_mac="AA:BB", dst_mac="CC:DD", pacote_dict=ack_pkt.to_dict())
                     enviar_pela_rede_ruidosa(self.sock, ack_frame.serializar(), ROUTER_ADDR)
 
-                    # --- NOVA LÓGICA DE ORDENAÇÃO NA TELA ---
                     with self.lock:
                         if seq_recebido == self.seq_esperado_servidor:
                             self.processar_mensagem_tela(segmento['payload'])
                             self.seq_esperado_servidor += 1
                             
-                            # Descarrega buffer de mensagens fora de ordem
                             while self.seq_esperado_servidor in self.buffer_recebimento:
                                 payload_buf = self.buffer_recebimento.pop(self.seq_esperado_servidor)
                                 self.processar_mensagem_tela(payload_buf)
