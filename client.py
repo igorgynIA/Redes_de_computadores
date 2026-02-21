@@ -4,20 +4,21 @@ import socket
 import threading
 import time
 import base64
+import sys
 from protocol import Segmento, Pacote, Quadro, enviar_pela_rede_ruidosa
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-MY_VIP = "HOST_A"
 DEST_VIP = "SERVIDOR_PRIME"
 ROUTER_ADDR = ("127.0.0.1", 5000)
 TIMEOUT_SEGUNDOS = 3.0
 
 class ChatClient(ctk.CTk):
-    def __init__(self):
+    def __init__(self, meu_vip):
         super().__init__()
-        self.title(f"Mini-NET - {MY_VIP} (Janela Deslizante)")
+        self.MY_VIP = meu_vip 
+        self.title(f"Mini-NET - {self.MY_VIP}")
         self.geometry("650x750")
 
         self.grid_columnconfigure(0, weight=1)
@@ -52,14 +53,22 @@ class ChatClient(ctk.CTk):
         self.btn_env.pack(side="left")
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(("127.0.0.1", 6001))
+        self.sock.bind(("127.0.0.1", 0))
         
+        # Estado de Envio
         self.seq_atual = 0
         self.mensagens_pendentes = {} 
         self.lock = threading.Lock()
         
+        # Estado de Recebimento (NOVO: Para ordenar mensagens do servidor)
+        self.seq_esperado_servidor = 0
+        self.buffer_recebimento = {}
+        
         threading.Thread(target=self.loop_recebimento, daemon=True).start()
         threading.Thread(target=self.monitor_timeouts, daemon=True).start()
+
+        seq_hello = self.obter_novo_seq()
+        threading.Thread(target=self.enviar_dados, args=("Entrou no chat", "hello", seq_hello)).start()
 
     def log(self, msg, tag=None):
         self.log_area.configure(state='normal')
@@ -90,38 +99,30 @@ class ChatClient(ctk.CTk):
         self.entry.focus_set()
 
     def atualizar_status_visual(self, seq, novo_icone):
-        """Atualiza EXATAMENTE o status atrelado ao número de sequência (SEQ)"""
         try:
             self.text_area.configure(state='normal')
-            tag_name = f"status_{seq}" # Busca a tag única da mensagem
+            tag_name = f"status_{seq}"
             ranges = self.text_area._textbox.tag_ranges(tag_name)
-            
             if ranges:
                 inicio, fim = ranges[0], ranges[1]
                 texto_atual = self.text_area._textbox.get(inicio, fim)
-                
-                # O texto atual é "15:42 🕒\n". Mantém a hora (5 chars) e troca o ícone
                 hora = texto_atual[:5]
                 novo_texto = f"{hora} {novo_icone}\n"
-                
                 self.text_area._textbox.delete(inicio, fim)
-                # Reinsere com as mesmas tags para futuras atualizações
                 self.text_area._textbox.insert(inicio, novo_texto, ("direita", tag_name))
-                
             self.text_area.configure(state='disabled')
-        except Exception as e:
-            pass
+        except: pass
 
     def construir_pilha(self, conteudo, tipo, seq, filename=None):
         app_data = {
             "type": tipo,
-            "sender": MY_VIP,
+            "sender": self.MY_VIP,
             "message": conteudo,
             "filename": filename,
             "timestamp": time.time()
         }
         seg = Segmento(seq_num=seq, is_ack=False, payload=app_data)
-        pkt = Pacote(src_vip=MY_VIP, dst_vip=DEST_VIP, ttl=5, segmento_dict=seg.to_dict())
+        pkt = Pacote(src_vip=self.MY_VIP, dst_vip=DEST_VIP, ttl=5, segmento_dict=seg.to_dict())
         frame = Quadro(src_mac="AA:BB", dst_mac="CC:DD", pacote_dict=pkt.to_dict())
         return frame.serializar()
 
@@ -142,7 +143,6 @@ class ChatClient(ctk.CTk):
         self.text_area.configure(state='normal')
         self.text_area.insert("end", f"Você: {texto}\n", "msg_user")
         
-        # Cria uma tag exclusiva para esse SEQ
         tag_status = f"status_{seq}"
         self.text_area._textbox.insert("end", f"{horario} 🕒\n", ("direita", tag_status))
         self.text_area.configure(state='disabled')
@@ -187,9 +187,11 @@ class ChatClient(ctk.CTk):
                 "tentativas": 1
             }
 
-        self.log(f"--- Iniciando envio SEQ {seq} ---", "amarelo")
+        if tipo != "hello":
+            self.log(f"--- Iniciando envio SEQ {seq} ---", "amarelo")
+        
         enviar_pela_rede_ruidosa(self.sock, bytes_envio, ROUTER_ADDR)
-        self.atualizar_status_visual(seq, "✓") # Atualiza visualmente para Enviado
+        if tipo != "hello": self.atualizar_status_visual(seq, "✓")
 
     def monitor_timeouts(self):
         while True:
@@ -203,6 +205,22 @@ class ChatClient(ctk.CTk):
                         self.log(f"TIMEOUT. Retransmitindo SEQ {seq} (Tentativa {info['tentativas']})", "amarelo")
                         enviar_pela_rede_ruidosa(self.sock, info["bytes"], ROUTER_ADDR)
 
+    def processar_mensagem_tela(self, payload):
+        """Helper para imprimir na tela a mensagem recebida"""
+        sender = payload['sender']
+        msg = payload['message']
+        tipo = payload.get('type')
+        
+        if tipo == "hello":
+            self.chat_print(f"[{sender} ENTROU NO CHAT]")
+            return
+
+        nome_arq = payload.get('filename')
+        if nome_arq:
+            self.chat_print(f"{sender} enviou arquivo: {nome_arq}")
+        else:
+            self.chat_print(f"{sender}: {msg}")
+
     def loop_recebimento(self):
         while True:
             try:
@@ -213,28 +231,47 @@ class ChatClient(ctk.CTk):
                     self.log("Pacote corrompido (CRC). Ignorado.", "vermelho")
                     continue
                 
-                segmento = quadro['data']['data']
+                pacote = quadro['data']
+                segmento = pacote['data']
                 
                 if segmento['is_ack']:
                     seq = segmento['seq_num']
-                    self.log(f"Recebido ACK {seq}", "ciano")
-                    
                     with self.lock:
                         if seq in self.mensagens_pendentes:
                             del self.mensagens_pendentes[seq]
                             self.log(f"ACK {seq} confirmado com sucesso!", "verde")
-                            self.atualizar_status_visual(seq, "✓✓") # Atualiza visualmente para Confirmado
+                            self.atualizar_status_visual(seq, "✓✓")
                 else:
-                    sender = segmento['payload']['sender']
-                    msg = segmento['payload']['message']
-                    nome_arq = segmento['payload'].get('filename')
-                    if nome_arq:
-                        self.chat_print(f"{sender} enviou arquivo: {nome_arq}")
-                    else:
-                        self.chat_print(f"{sender}: {msg}")
-            except Exception as e:
-                pass
+                    seq_recebido = segmento['seq_num']
+                    remetente_pacote = pacote['src_vip'] # SERVIDOR_PRIME
+                    
+                    # Envia ACK obrigatoriamente
+                    ack_seg = Segmento(seq_num=seq_recebido, is_ack=True, payload={})
+                    ack_pkt = Pacote(src_vip=self.MY_VIP, dst_vip=remetente_pacote, ttl=5, segmento_dict=ack_seg.to_dict())
+                    ack_frame = Quadro(src_mac="AA:BB", dst_mac="CC:DD", pacote_dict=ack_pkt.to_dict())
+                    enviar_pela_rede_ruidosa(self.sock, ack_frame.serializar(), ROUTER_ADDR)
+
+                    # --- NOVA LÓGICA DE ORDENAÇÃO NA TELA ---
+                    with self.lock:
+                        if seq_recebido == self.seq_esperado_servidor:
+                            self.processar_mensagem_tela(segmento['payload'])
+                            self.seq_esperado_servidor += 1
+                            
+                            # Descarrega buffer de mensagens fora de ordem
+                            while self.seq_esperado_servidor in self.buffer_recebimento:
+                                payload_buf = self.buffer_recebimento.pop(self.seq_esperado_servidor)
+                                self.processar_mensagem_tela(payload_buf)
+                                self.seq_esperado_servidor += 1
+                                
+                        elif seq_recebido > self.seq_esperado_servidor:
+                            if seq_recebido not in self.buffer_recebimento:
+                                self.buffer_recebimento[seq_recebido] = segmento['payload']
+                                self.log(f"Mensagem {seq_recebido} no buffer de tela.", "amarelo")
+
+            except Exception as e: pass
 
 if __name__ == "__main__":
-    app = ChatClient()
+    vip_escolhido = input("Digite seu VIP (Ex: HOST_A, HOST_B): ").strip().upper()
+    if not vip_escolhido: vip_escolhido = "HOST_ANONIMO"
+    app = ChatClient(vip_escolhido)
     app.mainloop()

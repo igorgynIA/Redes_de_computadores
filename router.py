@@ -1,20 +1,16 @@
 import socket
 from protocol import Quadro, enviar_pela_rede_ruidosa
 
-# Cores para o terminal
 C_RESET = "\033[0m"
-C_RED = "\033[91m"    # Erros físicos/CRC
-C_GREEN = "\033[92m"  # Mensagens de Aplicação
-C_YELLOW = "\033[93m" # Retransmissões/Transporte
-C_CYAN = "\033[96m"   # Controle/ACKs
-C_MAGENTA = "\033[95m"# Roteamento
+C_RED = "\033[91m"    
+C_GREEN = "\033[92m"  
+C_CYAN = "\033[96m"   
 
-# Configurações de Rede
 MY_ADDR = ("127.0.0.1", 5000)
-# Tabela de Roteamento Estática: VIP -> (IP_Real, Porta_Real)
+
+# Tabela dinâmica: Conhece apenas o Servidor no início
 ROUTING_TABLE = {
-    "HOST_A": ("127.0.0.1", 6001), # Porta onde o cliente vai ouvir
-    "SERVIDOR_PRIME": ("127.0.0.1", 6000) # Porta onde o servidor ouve
+    "SERVIDOR_PRIME": ("127.0.0.1", 6000)
 }
 
 def main():
@@ -28,32 +24,36 @@ def main():
             quadro_dict, integro = Quadro.deserializar(data)
             
             if not integro:
-                print(f"{C_RED}[ROUTER] Erro de CRC de {addr}. Descartando.{C_RED}")
-                continue
+                continue # Descarta silenciosamente se falhar o CRC
 
             pacote = quadro_dict['data']
+            src_vip = pacote['src_vip']
             dst_vip = pacote['dst_vip']
             ttl = pacote['ttl']
 
-            # Lógica de Roteamento (Fase 3)
+            # --- APRENDIZADO DE ROTA ---
+            # Se é um cliente novo, grava o IP e a Porta dele na tabela
+            if src_vip not in ROUTING_TABLE and src_vip != "SERVIDOR_PRIME":
+                ROUTING_TABLE[src_vip] = addr
+                print(f"{C_CYAN}[ROUTER] Aprendi rota para {src_vip}: Porta {addr[1]}{C_RESET}")
+
             if ttl <= 0:
-                print(f"{C_RED}[ROUTER] TTL expirado para {dst_vip}. Descartando.{C_RED}")
+                print(f"{C_RED}[ROUTER] TTL expirado para {dst_vip}. Descartando.{C_RESET}")
                 continue
 
+            # Encaminhamento
             if dst_vip in ROUTING_TABLE:
-                pacote['ttl'] -= 1 # Decremento do TTL
+                pacote['ttl'] -= 1 
                 proximo_no = ROUTING_TABLE[dst_vip]
                 
-                # Re-encapsula (Novo salto na camada de enlace)
                 novo_quadro = Quadro(src_mac="RT_01", dst_mac="SV_01", pacote_dict=pacote)
-                
-                print(f"{C_GREEN}[ROUTER] Encaminhando {dst_vip} para {proximo_no} (TTL: {pacote['ttl']}){C_GREEN}")
+                print(f"{C_GREEN}[ROUTER] Encaminhando de {src_vip} para {dst_vip}{C_RESET}")
                 enviar_pela_rede_ruidosa(sock, novo_quadro.serializar(), proximo_no)
             else:
-                print(f"{C_RED}[ROUTER] VIP {dst_vip} desconhecido.{C_RED}")
+                print(f"{C_RED}[ROUTER] VIP {dst_vip} desconhecido.{C_RESET}")
                 
-        except KeyboardInterrupt:
-            break
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()

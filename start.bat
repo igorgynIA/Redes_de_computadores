@@ -3,21 +3,21 @@ echo =======================================
 echo    Iniciando o Projeto Mini-NET...
 echo =======================================
 
-:: 1. Inicia o Roteador em uma nova janela de terminal
-start "Roteador" cmd /k "python router.py"
-
-:: Aguarda 1 segundo para garantir que a porta do roteador abriu
+:: 1. Inicia o Roteador
+start "Roteador (Fase 3)" cmd /k "python router.py"
 timeout /t 1 /nobreak >nul
 
-:: 2. Inicia o Servidor em uma nova janela de terminal
+:: 2. Inicia o Servidor
 start "Servidor" cmd /k "python server.py"
-
-:: Aguarda 1 segundo para garantir que o servidor subiu
 timeout /t 1 /nobreak >nul
 
-:: 3. Inicia o Cliente
-start "Cliente_HOST_A" cmd /k "python client.py"
+:: 3. Inicia o Cliente 1
+start "Cliente 1" cmd /k "python client.py"
+timeout /t 1 /nobreak >nul
 
-echo Todos os modulos foram iniciados em janelas separadas!
-echo Para encerrar, basta fechar as janelas do terminal.
+:: 4. Inicia o Cliente 2
+start "Cliente 2" cmd /k "python client.py"
+
+echo Todos os modulos foram iniciados!
+echo Configure os VIPs nas janelas dos clientes para testar o chat.
 pause
