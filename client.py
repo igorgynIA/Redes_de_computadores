@@ -6,6 +6,14 @@ import time
 import base64
 from protocol import Segmento, Pacote, Quadro, enviar_pela_rede_ruidosa
 
+# Cores para o terminal
+C_RED = "\033[91m"    # Erros físicos/CRC
+C_GREEN = "\033[92m"  # Mensagens de Aplicação
+C_YELLOW = "\033[93m" # Retransmissões/Transporte
+C_CYAN = "\033[96m"   # Controle/ACKs
+C_MAGENTA = "\033[95m"
+C_RESET = "\033[0m"
+
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -152,30 +160,47 @@ class ChatClient(ctk.CTk):
 
     def enviar_arquivo(self):
         path = filedialog.askopenfilename()
-        if path:
-            nome = path.split('/')[-1]
-            try:
-                with open(path, 'rb') as f:
-                    dados_brutos = f.read()
-                if len(dados_brutos) > 50000:
-                    self.log("ERRO: Arquivo muito grande (>50kb)", "vermelho")
-                    return
-                dados_b64 = base64.b64encode(dados_brutos).decode('utf-8')
+        if not path: return
+        
+        nome = path.split('/')[-1]
+        CHUNK_SIZE = 1024 # 1KB por pedaço
+        
+        with open(path, 'rb') as f:
+            dados_brutos = f.read()
 
-                seq = self.obter_novo_seq()
-                horario = time.strftime('%H:%M')
-                
-                self.text_area.configure(state='normal')
-                self.text_area.insert("end", f"Você: 📁 {nome}\n", "msg_user")
-                
-                tag_status = f"status_{seq}"
-                self.text_area._textbox.insert("end", f"{horario} 🕒\n", ("direita", tag_status))
-                self.text_area.configure(state='disabled')
-                self.text_area.see("end")
+        # Fragmentação correta
+        fatias = [dados_brutos[i:i + CHUNK_SIZE] for i in range(0, len(dados_brutos), CHUNK_SIZE)]
+        total = len(fatias)
+        
+        self.log(f"Fragmentando {nome} em {total} pacotes...", "ciano")
 
-                threading.Thread(target=self.enviar_dados, args=(dados_b64, "file", seq, nome)).start()
-            except Exception as e:
-                self.log(f"Erro ao ler arquivo: {e}", "vermelho")
+        # Dispara os fragmentos
+        for i, fatia_binaria in enumerate(fatias):
+            fatia_b64 = base64.b64encode(fatia_binaria).decode('utf-8')
+            
+            # O Payload contém os dados do pedaço
+            payload_fragmento = {
+                "filename": nome, 
+                "chunk_index": i, 
+                "total_chunks": total, 
+                "content": fatia_b64
+            }
+            
+            # IMPORTANTE: Cada fragmento ganha um SEQ ÚNICO para o transporte
+            seq = self.obter_novo_seq()
+            
+            # Registra no monitor de timeouts global para retransmissão automática
+            bytes_p = self.construir_pilha(payload_fragmento, "file_chunk", seq)
+            
+            with self.lock:
+                self.mensagens_pendentes[seq] = {
+                    "bytes": bytes_p,
+                    "time": time.time(),
+                    "tentativas": 1
+                }
+            
+            # Envio inicial
+            enviar_pela_rede_ruidosa(self.sock, bytes_p, ROUTER_ADDR)
 
     def enviar_dados(self, conteudo, tipo, seq, filename=None):
         bytes_envio = self.construir_pilha(conteudo, tipo, seq, filename)
@@ -206,34 +231,61 @@ class ChatClient(ctk.CTk):
     def loop_recebimento(self):
         while True:
             try:
+                # Mantemos o buffer maior para evitar truncamento de JSONs grandes
                 data, _ = self.sock.recvfrom(50000)
+                
+                # Deserializa e verifica integridade (Camada de Enlace)
                 quadro, integro = Quadro.deserializar(data)
                 
                 if not integro:
-                    self.log("Pacote corrompido (CRC). Ignorado.", "vermelho")
+                    # Log em vermelho para erro de CRC (Camada Física/Enlace)
+                    self.log("Erro de integridade (CRC)! Pacote descartado.", "red")
                     continue
                 
-                segmento = quadro['data']['data']
+                # Decapsulamento: Quadro -> Pacote -> Segmento
+                pacote = quadro['data'] #
+                segmento = pacote['data'] #
                 
+                # Lógica de Transporte (ACKs Sequenciais)
                 if segmento['is_ack']:
                     seq = segmento['seq_num']
-                    self.log(f"Recebido ACK {seq}", "ciano")
+                    # Log em ciano para mensagens de controle
+                    self.log(f"Recebido ACK {seq}", "cyan")
                     
+                    # O LOCK é essencial para evitar conflito com a thread de retransmissão
                     with self.lock:
                         if seq in self.mensagens_pendentes:
+                            # Remove do dicionário de pendentes para interromper retransmissões
                             del self.mensagens_pendentes[seq]
-                            self.log(f"ACK {seq} confirmado com sucesso!", "verde")
-                            self.atualizar_status_visual(seq, "✓✓") # Atualiza visualmente para Confirmado
+                            
+                            # Feedback visual de sucesso
+                            self.log(f"Confirmação do Pacote {seq} OK!", "green")
+                            self.atualizar_status_visual(seq, "✓✓")
+                
+                # Lógica de Aplicação (Mensagens Recebidas)
                 else:
-                    sender = segmento['payload']['sender']
-                    msg = segmento['payload']['message']
-                    nome_arq = segmento['payload'].get('filename')
-                    if nome_arq:
-                        self.chat_print(f"{sender} enviou arquivo: {nome_arq}")
+                    payload = segmento['payload']
+                    sender = payload.get('sender', 'Desconhecido')
+                    
+                    # Verifica se o que chegou é um fragmento de arquivo
+                    if payload.get('type') == "file_chunk":
+                        chunk_data = payload.get('message', {})
+                        nome_arq = chunk_data.get('filename', 'arquivo')
+                        idx = chunk_data.get('chunk_index')
+                        total = chunk_data.get('total_chunks')
+                        
+                        self.chat_print(f"📦 {sender} enviando: {nome_arq} ({idx+1}/{total})")
+                        # Dica: Se quiser que o CLIENTE também receba arquivos, 
+                        # o Amigo A deve implementar o buffer de reconstrução aqui.
                     else:
+                        # Chat convencional
+                        msg = payload.get('message', '')
                         self.chat_print(f"{sender}: {msg}")
+
             except Exception as e:
-                pass
+                # Em caso de erro na rede ou socket fechado
+                print(f"Erro no loop de recebimento: {e}")
+                break
 
 if __name__ == "__main__":
     app = ChatClient()
