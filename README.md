@@ -5,22 +5,17 @@ Este projeto consiste na implementação de uma rede emulada com quatro camadas 
 ## 📋 Pré-requisitos
 
 * **Python 3.x** instalado.
-* Todos os arquivos (`client.py`, `server.py`, `router.py`, `protocolo.py`) devem estar localizados no mesmo diretório.
+* Biblioteca **CustomTkinter** (`pip install customtkinter`).
+* Todos os arquivos (`client.py`, `server.py`, `router.py`, `protocolo.py`, `main.py`) devem estar localizados no mesmo diretório.
 
 ## 🚀 Como Executar
 
-Para que a rede funcione corretamente, os terminais devem ser iniciados na ordem abaixo. Abra **três instâncias** do seu terminal:
+Para facilitar o teste, utilize o script de automação que inicia todos os componentes na ordem correta:
 
-1. **Terminal 1 (Servidor):** Destino final das mensagens e arquivos.
+1. **Terminal Único:** Execute o inicializador:
    ```bash
-   python server.py
+   python main.py
 
-2. **Terminal 2 (Roteador):** Intermediário responsável pelo endereçamento lógico (VIP) e controle de salto (TTL).
-   ```bash
-   python router.py
+Na interface aberta após nomear o client.py, digite suas mensagens na área de texto e visualize as tentativas de comunicação da rede. Os logs em vermelho indicam erros como alteração dos bits e perda de pacotes, cor amarela indica a retransmissão dos pacotes e cor verde indica que o processo está andando conforme o planejado.
 
-3. **Terminal 3 (Cliente):** Interface gráfica (GUI) para interação do usuário.
-   ```bash
-   python client.py
-
-Na interface aberta após rodar o client.py, digite suas mensagens na área de texto e visualize as tentativas de comunicação da rede. Os logs em vermelho indicam erros como alteração dos bits e perda de pacotes, cor amarela indica a retransmissão dos pacotes e cor verde indica que o processo está andando conforme o planejado.
+Essa interface é criada no estilo de bate-papo em grupo, de modo que todos os participantes tem acesso às mensagens, arquivos e emojis enviados pelos demais, assim como o horário de envio.
