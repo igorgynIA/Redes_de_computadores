@@ -202,7 +202,7 @@ class ChatClient(ctk.CTk):
             with open(path, 'rb') as f:
                 dados_brutos = f.read()
 
-            # MUDANÇA: Converte o arquivo TODO para base64 primeiro, DEPOIS corta o texto.
+
             dados_b64_completos = base64.b64encode(dados_brutos).decode('utf-8')
             
             fatias = [dados_b64_completos[i:i + CHUNK_SIZE] for i in range(0, len(dados_b64_completos), CHUNK_SIZE)]
