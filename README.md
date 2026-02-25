@@ -11,7 +11,7 @@ Este projeto consiste na implementação de uma rede emulada com quatro camadas 
 
 ## 🎥 Demonstração
 
-https://github.com/igorgynIA/Redes_de_computadores/raw/main/midia/redes.mp4
+https://github.com/user-attachments/assets/179f0e50-5bb5-45b4-a4c4-18f728fc767b
 
 *(Caso o player não carregue, [clique aqui para visualizar o vídeo](midia/redes.mp4))*
 
