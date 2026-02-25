@@ -1,3 +1,8 @@
+# Integrantes e Matrícula do grupo
+CLEIVER BATISTA DA SILVA JUNIOR - 202403899
+FREDERICO BARBOSA RELVAS - 202403902
+IGOR DIAS AGUIAR - 202403907
+
 # 🌐 Mini-NET: Emulação de Pilha de Protocolos
 
 Este projeto consiste na implementação de uma rede emulada com quatro camadas (Aplicação, Transporte, Rede e Enlace) operando sobre o protocolo UDP. O sistema utiliza um simulador de canal físico que introduz **20% de probabilidade de perda** e **20% de corrupção de bits** para testar a resiliência dos protocolos.
