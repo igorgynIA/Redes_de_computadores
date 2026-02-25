@@ -1,7 +1,9 @@
 # Integrantes e Matrícula do grupo
 CLEIVER BATISTA DA SILVA JUNIOR - 202403899
+
 FREDERICO BARBOSA RELVAS - 202403902
-IGOR DIAS AGUIAR - 202403907
+
+IGOR DIAS AGUIAR - 202403907 
 
 # 🌐 Mini-NET: Emulação de Pilha de Protocolos
 
