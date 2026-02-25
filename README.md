@@ -9,6 +9,12 @@ IGOR DIAS AGUIAR - 202403907
 
 Este projeto consiste na implementação de uma rede emulada com quatro camadas (Aplicação, Transporte, Rede e Enlace) operando sobre o protocolo UDP. O sistema utiliza um simulador de canal físico que introduz **20% de probabilidade de perda** e **20% de corrupção de bits** para testar a resiliência dos protocolos.
 
+## 🎥 Demonstração
+
+<video src="midia/redes.mp4" width="100%" controls="controls"></video>
+
+*(Caso o player não carregue, [clique aqui para visualizar o vídeo](midia/redes.mp4))*
+
 ## 📋 Pré-requisitos
 
 * **Python 3.x** instalado.
